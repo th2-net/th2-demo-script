@@ -1,3 +1,16 @@
+# Copyright 2021-2025 Exactpro (Exactpro Systems Limited)
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import print_function
 
 import datetime
@@ -20,7 +33,7 @@ with open('configs/firms.refdata') as f:
 
 def scenario(factory, parent=None):
     # Storing EventID object of root Event.
-    report_id = sf.create_event_id(factory)
+    report_id = sf.create_event_id(factory['factory'])
 
     # Initialize chain_id for script
     ver1_chain = None
@@ -50,7 +63,7 @@ def scenario(factory, parent=None):
             f"Case[TC_{scenario_id}.{case_id}]: "
             f"Trader {trader1} vs trader {trader2} for instrument {instrument['SecurityID']}",
             report_id, {
-                'case_id': sf.create_event_id(factory),
+                'case_id': sf.create_event_id(factory['factory']),
                 'Instrument': instrument['SecurityID'],
                 'Order1Price': instrument['Price'],
                 'Order1Qty': 30,

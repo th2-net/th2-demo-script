@@ -1,20 +1,36 @@
+# Copyright 2020-2025 Exactpro (Exactpro Systems Limited)
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import print_function
 
 import copy
 import logging
 import random
-import uuid
 import time
+import uuid
 from pathlib import Path
-from th2_grpc_act_template.act_template_pb2 import PlaceMessageRequest
+
 from google.protobuf.timestamp_pb2 import Timestamp
 from th2_common.schema.factory.common_factory import CommonFactory
+from th2_common.schema.message.message_router import MessageRouter
 from th2_grpc_act_template.act_service import ActService
+from th2_grpc_act_template.act_template_pb2 import PlaceMessageRequest
 from th2_grpc_check1 import check1_pb2
 from th2_grpc_check1.check1_service import Check1Service
 from th2_grpc_common.common_pb2 import (ValueFilter, FilterOperation, MessageMetadata, MessageFilter, RootMessageFilter,
                                         ConnectionID, EventID, ListValue, Value, Message,
-                                        ListValueFilter, MessageID, Event, EventBatch)
+                                        ListValueFilter, MessageID, Event, EventBatch, RawMessage, MessageGroupBatch,
+                                        MessageGroup, AnyMessage, RawMessageMetadata, Direction)
 
 
 # -----------Connection functions
@@ -57,15 +73,15 @@ def to_msg_body(string):
 def create_event_id(factory):
     start_timestamp = Timestamp()
     start_timestamp.GetCurrentTime()
-    book_name = factory['factory'].box_configuration.book_name
-    scope = factory['factory'].box_configuration.box_name
+    book_name = factory.box_configuration.book_name
+    scope = factory.box_configuration.box_name
     return EventID(id=str(uuid.uuid1()), book_name=book_name, scope=scope, start_timestamp=start_timestamp)
 
 
 def store_event(factory, name, event_id=None, parent_id=None, body=b"", status='SUCCESS', etype=''):
     new_event_id = event_id
     if new_event_id is None:
-        new_event_id = create_event_id(factory)
+        new_event_id = create_event_id(factory['factory'])
     submit_event(
         estore=factory['estore'],
         event_batch=create_event_batch(
@@ -78,7 +94,8 @@ def store_event(factory, name, event_id=None, parent_id=None, body=b"", status='
     return new_event_id
 
 
-def create_event_batch(report_name, event_id, parent_id=None, status='SUCCESS', body=b"", etype=''):
+def create_event_batch(report_name, event_id, parent_id=None, status='SUCCESS', body=b"", etype='',
+                       attached_message_ids: list[MessageID] = None):
     current_timestamp = Timestamp()
     current_timestamp.GetCurrentTime()
     logging.info(f'Storing event {report_name}...')
@@ -89,11 +106,48 @@ def create_event_batch(report_name, event_id, parent_id=None, status='SUCCESS', 
         body=body,
         type=etype,
         end_timestamp=current_timestamp,
-        parent_id=parent_id)
-    event_batch = EventBatch()
-    event_batch.events.append(event)
+        parent_id=parent_id
+    )
+    if attached_message_ids:
+        for attached_message_id in attached_message_ids:
+            event.attached_message_ids.append(attached_message_id)
 
-    return event_batch
+    return EventBatch(events=[event])
+
+
+# -------mstore functions
+def submit_message(mstore: MessageRouter, message_batch: MessageGroupBatch):
+    logging.debug(f'Message content:{str(message_batch)}')
+    response = mstore.send(message_batch, 'raw')
+    logging.debug(f'Mstore response content:{str(response)}')
+
+
+def create_message_id(factory: CommonFactory, session_alias: str, direction: Direction, sequence: int):
+    timestamp = Timestamp()
+    timestamp.GetCurrentTime()
+    book_name = factory.box_configuration.book_name
+    return MessageID(book_name=book_name, connection_id=ConnectionID(session_alias=session_alias), direction=direction,
+                     timestamp=timestamp, sequence=sequence)
+
+
+def create_raw_message(message_id: MessageID, body: bytes, properties: dict[str, str] = None,
+                       protocol: str = None) -> RawMessage:
+    metadata = RawMessageMetadata(id=message_id)
+    if properties:
+        for key, value in properties.items():
+            metadata.properties[key] = value
+    if protocol:
+        metadata.protocol = protocol
+    return RawMessage(metadata=metadata, body=body)
+
+
+def create_message_group_batch(*messages: RawMessage) -> MessageGroupBatch:
+    return MessageGroupBatch(
+        groups=[
+            MessageGroup(messages=[
+                AnyMessage(raw_message=message) for message in messages
+            ])
+        ])
 
 
 # -------------act functions
